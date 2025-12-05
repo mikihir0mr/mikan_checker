@@ -10,6 +10,9 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=Outfit:wght@400;700&display=swap"
         rel="stylesheet">
+    <!-- TensorFlow.js & COCO-SSD -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
         :root {
             --primary-color: #ff9800;
@@ -82,6 +85,17 @@
             object-fit: cover;
         }
 
+        /* Overlay Canvas for Bounding Box */
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+        }
+
         /* Controls & Overlay */
         .controls {
             position: absolute;
@@ -120,6 +134,13 @@
         button.stop {
             background: var(--stop-gradient);
             box-shadow: 0 8px 20px rgba(211, 47, 47, 0.4);
+        }
+
+        button:disabled {
+            background: #555;
+            box-shadow: none;
+            cursor: not-allowed;
+            opacity: 0.7;
         }
 
         /* Result Card */
@@ -196,6 +217,19 @@
             box-shadow: 0 0 8px #4caf50;
         }
 
+        #status-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 8px;
+            pointer-events: none;
+            display: none;
+        }
+
         .hidden {
             display: none !important;
         }
@@ -210,7 +244,8 @@
 
     <div class="container">
         <div id="camera-view">
-            <video id="video" autoplay playsinline></video>
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="overlay"></canvas>
 
             <div id="realtime-result">
                 <div class="label">SUGAR CONTENT</div>
@@ -223,9 +258,11 @@
                 </div>
             </div>
 
+            <div id="status-msg">Loading AI Model...</div>
+
             <div class="controls">
-                <button id="toggle-predict-btn">
-                    <span>START PREDICTION</span>
+                <button id="toggle-predict-btn" disabled>
+                    <span>LOADING AI...</span>
                 </button>
             </div>
         </div>
@@ -233,14 +270,41 @@
 
     <script>
         const video = document.getElementById('video');
-        const canvas = document.createElement('canvas');
+        const overlay = document.getElementById('overlay');
+        const ctxOverlay = overlay.getContext('2d');
+        const canvas = document.createElement('canvas'); // Off-screen canvas for cropping
         const toggleBtn = document.getElementById('toggle-predict-btn');
         const realtimeResult = document.getElementById('realtime-result');
         const rtSugar = document.getElementById('rt-sugar');
         const rtConfidence = document.getElementById('rt-confidence');
+        const statusMsg = document.getElementById('status-msg');
 
         let isPredicting = false;
-        let intervalId = null;
+        let animationId = null;
+        let detector = null;
+        let lastPredictionTime = 0;
+        const PREDICTION_INTERVAL = 500; // Predict sugar every 500ms
+
+        // Initialize
+        async function init() {
+            statusMsg.style.display = 'block';
+
+            // Load COCO-SSD
+            try {
+                detector = await cocoSsd.load();
+                console.log("COCO-SSD loaded");
+                toggleBtn.disabled = false;
+                toggleBtn.innerHTML = "<span>START PREDICTION</span>";
+                statusMsg.style.display = 'none';
+            } catch (e) {
+                console.error("Failed to load model", e);
+                statusMsg.textContent = "Error loading AI";
+                return;
+            }
+
+            // Start Camera
+            await startCamera();
+        }
 
         async function startCamera() {
             try {
@@ -252,13 +316,24 @@
                     }
                 });
                 video.srcObject = stream;
+
+                // Wait for video to be ready
+                video.onloadedmetadata = () => {
+                    video.play();
+                    resizeOverlay();
+                };
             } catch (err) {
                 console.error("Error accessing camera:", err);
                 alert("カメラにアクセスできませんでした。");
             }
         }
 
-        startCamera();
+        function resizeOverlay() {
+            overlay.width = video.videoWidth;
+            overlay.height = video.videoHeight;
+        }
+
+        window.addEventListener('resize', resizeOverlay);
 
         toggleBtn.addEventListener('click', () => {
             if (isPredicting) {
@@ -273,8 +348,7 @@
             toggleBtn.innerHTML = "<span>STOP</span>";
             toggleBtn.classList.add('stop');
             realtimeResult.classList.add('visible');
-
-            intervalId = setInterval(captureAndPredict, 500);
+            detectLoop();
         }
 
         function stopPrediction() {
@@ -282,20 +356,65 @@
             toggleBtn.innerHTML = "<span>START PREDICTION</span>";
             toggleBtn.classList.remove('stop');
             realtimeResult.classList.remove('visible');
-            clearInterval(intervalId);
+            cancelAnimationFrame(animationId);
+            ctxOverlay.clearRect(0, 0, overlay.width, overlay.height);
         }
 
-        async function captureAndPredict() {
-            if (!video.videoWidth) return;
+        async function detectLoop() {
+            if (!isPredicting) return;
 
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+            // Ensure video dimensions are available
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                // 1. Detect Objects
+                const predictions = await detector.detect(video);
+
+                // 2. Find 'orange'
+                const orange = predictions.find(p => p.class === 'orange');
+
+                ctxOverlay.clearRect(0, 0, overlay.width, overlay.height);
+
+                if (orange) {
+                    // Draw Bounding Box
+                    const [x, y, width, height] = orange.bbox;
+                    ctxOverlay.strokeStyle = '#00FF00';
+                    ctxOverlay.lineWidth = 4;
+                    ctxOverlay.strokeRect(x, y, width, height);
+
+                    ctxOverlay.font = '18px Arial';
+                    ctxOverlay.fillStyle = '#00FF00';
+                    ctxOverlay.fillText(`Mikan (${Math.round(orange.score * 100)}%)`, x, y > 10 ? y - 5 : 10);
+
+                    // 3. Predict Sugar (Throttled)
+                    const now = Date.now();
+                    if (now - lastPredictionTime > PREDICTION_INTERVAL) {
+                        lastPredictionTime = now;
+                        await predictSugar(orange.bbox);
+                    }
+                } else {
+                    // Optional: Show "Looking for Mikan..."
+                }
+            }
+
+            animationId = requestAnimationFrame(detectLoop);
+        }
+
+        async function predictSugar(bbox) {
+            const [x, y, width, height] = bbox;
+
+            // Add some padding to the crop if possible
+            const padding = 0; // 10% padding? maybe later
+
+            // Crop image
+            canvas.width = width;
+            canvas.height = height;
             const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Draw only the cropped area
+            ctx.drawImage(video, x, y, width, height, 0, 0, width, height);
 
             canvas.toBlob(async (blob) => {
                 const formData = new FormData();
-                formData.append('file', blob, 'mikan.jpg');
+                formData.append('file', blob, 'mikan_crop.jpg');
 
                 try {
                     const response = await fetch('/predict', {
@@ -305,7 +424,6 @@
                     const data = await response.json();
 
                     if (!data.error) {
-                        // Animate value change slightly if needed, for now direct update
                         rtSugar.textContent = data.sugar_content;
                         rtConfidence.textContent = (data.confidence * 100).toFixed(1);
                     }
@@ -314,6 +432,9 @@
                 }
             }, 'image/jpeg');
         }
+
+        // Start initialization
+        init();
     </script>
 
 </body>
