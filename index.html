@@ -248,137 +248,379 @@
             <div class="controls">
                 <button id="toggle-predict-btn" disabled>
                     <span>LOADING AI...</span>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const video = document.getElementById('video');
-        const overlay = document.getElementById('overlay');
-        const ctxOverlay = overlay.getContext('2d');
-        const canvas = document.createElement('canvas'); // Off-screen canvas for cropping
-        const toggleBtn = document.getElementById('toggle-predict-btn');
-        const realtimeResult = document.getElementById('realtime-result');
-        const rtSugar = document.getElementById('rt-sugar');
-        const rtConfidence = document.getElementById('rt-confidence');
-        const statusMsg = document.getElementById('status-msg');
-
-        let isPredicting = false;
-        let animationId = null;
-        let detector = null;
-        let lastPredictionTime = 0;
-        const PREDICTION_INTERVAL = 500; // Predict sugar every 500ms
-
-        // Initialize
-        async function init() {
-            statusMsg.style.display = 'block';
-
-            // Load COCO-SSD
-            try {
-                detector = await cocoSsd.load();
-                console.log("COCO-SSD loaded");
-                toggleBtn.disabled = false;
-                toggleBtn.innerHTML = "<span>START PREDICTION</span>";
-                statusMsg.style.display = 'none';
-            } catch (e) {
-                console.error("Failed to load model", e);
-                statusMsg.textContent = "Error loading AI";
-                return;
-            }
-
-            // Start Camera
-            await startCamera();
-        }
-
-        async function startCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: 'environment',
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
+                    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
                     }
-                });
-                video.srcObject = stream;
 
-                // Wait for video to be ready
-                video.onloadedmetadata = () => {
-                    video.play();
-                    resizeOverlay();
-                };
-            } catch (err) {
-                console.error("Error accessing camera:", err);
-                alert("カメラにアクセスできませんでした。");
-            }
-        }
+                    /* Camera View */
+                    .container {
+                    position: relative;
+                    width: 100%;
+                    height: 100%;
+                    display: flex;
+                    flex-direction: column;
+                    }
 
-        function resizeOverlay() {
-            overlay.width = video.videoWidth;
-            overlay.height = video.videoHeight;
-        }
+                    #camera-view {
+                    flex: 1;
+                    position: relative;
+                    overflow: hidden;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    background: #000;
+                    }
 
-        window.addEventListener('resize', resizeOverlay);
+                    video {
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                    }
 
-        toggleBtn.addEventListener('click', () => {
-            if (isPredicting) {
-                stopPrediction();
-            } else {
-                startPrediction();
-            }
-        });
+                    /* Overlay Canvas for Bounding Box */
+                    #overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    pointer-events: none;
+                    z-index: 5;
+                    }
 
-        function startPrediction() {
-            isPredicting = true;
-            toggleBtn.innerHTML = "<span>STOP</span>";
-            toggleBtn.classList.add('stop');
-            realtimeResult.classList.add('visible');
-            detectLoop();
-        }
+                    /* Controls & Overlay */
+                    .controls {
+                    position: absolute;
+                    bottom: 40px;
+                    left: 0;
+                    width: 100%;
+                    display: flex;
+                    justify-content: center;
+                    z-index: 20;
+                    padding-bottom: env(safe-area-inset-bottom);
+                    }
 
-        function stopPrediction() {
-            isPredicting = false;
-            toggleBtn.innerHTML = "<span>START PREDICTION</span>";
-            toggleBtn.classList.remove('stop');
-            realtimeResult.classList.remove('visible');
-            cancelAnimationFrame(animationId);
-            ctxOverlay.clearRect(0, 0, overlay.width, overlay.height);
-        }
+                    button {
+                    background: var(--primary-gradient);
+                    color: white;
+                    border: none;
+                    padding: 16px 32px;
+                    font-size: 1rem;
+                    border-radius: 50px;
+                    cursor: pointer;
+                    box-shadow: 0 8px 20px rgba(255, 87, 34, 0.4);
+                    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+                    font-weight: 700;
+                    letter-spacing: 0.05em;
+                    -webkit-tap-highlight-color: transparent;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    }
 
+                    button:active {
+                    transform: scale(0.95);
+                    box-shadow: 0 4px 10px rgba(255, 87, 34, 0.3);
+                    }
 
-        // Crop image
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
+                    button.stop {
+                    background: var(--stop-gradient);
+                    box-shadow: 0 8px 20px rgba(211, 47, 47, 0.4);
+                    }
 
-        // Draw only the cropped area
-        ctx.drawImage(video, x, y, width, height, 0, 0, width, height);
+                    button:disabled {
+                    background: #555;
+                    box-shadow: none;
+                    cursor: not-allowed;
+                    opacity: 0.7;
+                    }
 
-        canvas.toBlob(async (blob) => {
-            const formData = new FormData();
-            formData.append('file', blob, 'mikan_crop.jpg');
+                    /* Result Card */
+                    #realtime-result {
+                    position: absolute;
+                    top: 80px;
+                    left: 50%;
+                    transform: translateX(-50%) translateY(-20px);
+                    background: rgba(20, 20, 20, 0.6);
+                    backdrop-filter: blur(16px);
+                    -webkit-backdrop-filter: blur(16px);
+                    padding: 20px 30px;
+                    border-radius: 24px;
+                    border: 1px solid var(--glass-border);
+                    text-align: center;
+                    z-index: 15;
+                    min-width: 220px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.1em;
+                    }
 
-            try {
-                const response = await fetch('/predict', {
-                    method: 'POST',
-                    body: formData
-                });
-                const data = await response.json();
+                    .sugar-value {
+                    font-size: 3.5rem;
+                    font-weight: 900;
+                    background: linear-gradient(to bottom, #fff, #ffe0b2);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    line-height: 1;
+                    margin-bottom: 4px;
+                    font-family: 'Outfit', sans-serif;
+                    }
 
-                if (!data.error) {
-                    rtSugar.textContent = data.sugar_content;
-                    rtConfidence.textContent = (data.confidence * 100).toFixed(1);
-                }
-            } catch (err) {
-                console.error(err);
-            }
-        }, 'image/jpeg');
-                }
+                    .unit {
+                    font-size: 1rem;
+                    font-weight: 500;
+                    color: rgba(255, 255, 255, 0.9);
+                    margin-left: 4px;
+                    }
 
-        // Start initialization
-        init();
-    </script>
+                    .confidence-container {
+                    margin-top: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 6px;
+                    font-size: 0.8rem;
+                    color: rgba(255, 255, 255, 0.6);
+                    background: rgba(255, 255, 255, 0.1);
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    display: inline-flex;
+                    }
 
-</body>
+                    .confidence-dot {
+                    width: 6px;
+                    height: 6px;
+                    background-color: #4caf50;
+                    border-radius: 50%;
+                    box-shadow: 0 0 8px #4caf50;
+                    }
+
+                    #status-msg {
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    color: white;
+                    background: rgba(0, 0, 0, 0.5);
+                    padding: 10px 20px;
+                    border-radius: 8px;
+                    pointer-events: none;
+                    display: none;
+                    }
+
+                    .hidden {
+                    display: none !important;
+                    }
+                    </style>
+                    </head>
+
+                    <body>
+
+                        <header>
+                            <h1>🍊 Mikan Checker</h1>
+                        </header>
+
+                        <div class="container">
+                            <div id="camera-view">
+                                <video id="video" autoplay playsinline muted></video>
+                                <canvas id="overlay"></canvas>
+
+                                <div id="realtime-result">
+                                    <div class="label">SUGAR CONTENT</div>
+                                    <div class="value-wrapper">
+                                        <span id="rt-sugar" class="sugar-value">-</span><span class="unit">度</span>
+                                    </div>
+                                    <div class="confidence-container">
+                                        <div class="confidence-dot"></div>
+                                        <span>Confidence: <span id="rt-confidence">-</span>%</span>
+                                    </div>
+                                </div>
+
+                                <div id="status-msg">Loading AI Model...</div>
+
+                                <div class="controls">
+                                    <button id="toggle-predict-btn" disabled>
+                                        <span>LOADING AI...</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <script>
+                            const video = document.getElementById('video');
+                            const overlay = document.getElementById('overlay');
+                            const ctxOverlay = overlay.getContext('2d');
+                            const canvas = document.createElement('canvas'); // Off-screen canvas for cropping
+                            const toggleBtn = document.getElementById('toggle-predict-btn');
+                            const realtimeResult = document.getElementById('realtime-result');
+                            const rtSugar = document.getElementById('rt-sugar');
+                            const rtConfidence = document.getElementById('rt-confidence');
+                            const statusMsg = document.getElementById('status-msg');
+
+                            let isPredicting = false;
+                            let animationId = null;
+                            let detector = null;
+                            let lastPredictionTime = 0;
+                            const PREDICTION_INTERVAL = 500; // Predict sugar every 500ms
+
+                            // Initialize
+                            async function init() {
+                                statusMsg.style.display = 'block';
+
+                                // Load COCO-SSD
+                                try {
+                                    detector = await cocoSsd.load();
+                                    console.log("COCO-SSD loaded");
+                                    toggleBtn.disabled = false;
+                                    toggleBtn.innerHTML = "<span>START PREDICTION</span>";
+                                    statusMsg.style.display = 'none';
+                                } catch (e) {
+                                    console.error("Failed to load model", e);
+                                    statusMsg.textContent = "Error loading AI";
+                                    return;
+                                }
+
+                                // Start Camera
+                                await startCamera();
+                            }
+
+                            async function startCamera() {
+                                try {
+                                    const stream = await navigator.mediaDevices.getUserMedia({
+                                        video: {
+                                            facingMode: 'environment',
+                                            width: { ideal: 1280 },
+                                            height: { ideal: 720 }
+                                        }
+                                    });
+                                    video.srcObject = stream;
+
+                                    // Wait for video to be ready
+                                    video.onloadedmetadata = () => {
+                                        video.play();
+                                        resizeOverlay();
+                                    };
+                                } catch (err) {
+                                    console.error("Error accessing camera:", err);
+                                    alert("カメラにアクセスできませんでした。");
+                                }
+                            }
+
+                            function resizeOverlay() {
+                                overlay.width = video.videoWidth;
+                                overlay.height = video.videoHeight;
+                            }
+
+                            window.addEventListener('resize', resizeOverlay);
+
+                            toggleBtn.addEventListener('click', () => {
+                                if (isPredicting) {
+                                    stopPrediction();
+                                } else {
+                                    startPrediction();
+                                }
+                            });
+
+                            function startPrediction() {
+                                isPredicting = true;
+                                toggleBtn.innerHTML = "<span>STOP</span>";
+                                toggleBtn.classList.add('stop');
+                                realtimeResult.classList.add('visible');
+                                detectLoop();
+                            }
+
+                            function stopPrediction() {
+                                isPredicting = false;
+                                toggleBtn.innerHTML = "<span>START PREDICTION</span>";
+                                toggleBtn.classList.remove('stop');
+                                realtimeResult.classList.remove('visible');
+                                cancelAnimationFrame(animationId);
+                                ctxOverlay.clearRect(0, 0, overlay.width, overlay.height);
+                            }
+
+                            async function detectLoop() {
+                                if (!isPredicting) return;
+
+                                // Ensure video dimensions are available
+                                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                                    // 1. Detect Objects
+                                    const predictions = await detector.detect(video);
+
+                                    // 2. Find 'orange'
+                                    const orange = predictions.find(p => p.class === 'orange');
+
+                                    ctxOverlay.clearRect(0, 0, overlay.width, overlay.height);
+
+                                    if (orange) {
+                                        // Found: Show active state
+                                        realtimeResult.classList.remove('undetected');
+
+                                        // Draw Bounding Box
+                                        const [x, y, width, height] = orange.bbox;
+                                        ctxOverlay.strokeStyle = '#00FF00';
+                                        ctxOverlay.lineWidth = 4;
+                                        ctxOverlay.strokeRect(x, y, width, height);
+
+                                        ctxOverlay.font = '18px Arial';
+                                        ctxOverlay.fillStyle = '#00FF00';
+                                        ctxOverlay.fillText(`Mikan (${Math.round(orange.score * 100)}%)`, x, y > 10 ? y - 5 : 10);
+
+                                        // 3. Predict Sugar (Throttled)
+                                        const now = Date.now();
+                                        if (now - lastPredictionTime > PREDICTION_INTERVAL) {
+                                            lastPredictionTime = now;
+                                            await predictSugar(orange.bbox);
+                                        }
+                                    } else {
+                                        // Not found: Show ghost state (last value)
+                                        realtimeResult.classList.add('undetected');
+                                    }
+                                }
+
+                                animationId = requestAnimationFrame(detectLoop);
+                            }
+
+                            async function predictSugar(bbox) {
+                                const [x, y, width, height] = bbox;
+
+                                // Add some padding to the crop if possible
+                                const padding = 0; // 10% padding? maybe later
+
+                                // Crop image
+                                canvas.width = width;
+                                canvas.height = height;
+                                const ctx = canvas.getContext('2d');
+
+                                // Draw only the cropped area
+                                ctx.drawImage(video, x, y, width, height, 0, 0, width, height);
+
+                                canvas.toBlob(async (blob) => {
+                                    const formData = new FormData();
+                                    formData.append('file', blob, 'mikan_crop.jpg');
+
+                                    try {
+                                        const response = await fetch('/predict', {
+                                            method: 'POST',
+                                            body: formData
+                                        });
+                                        const data = await response.json();
+
+                                        if (!data.error) {
+                                            rtSugar.textContent = data.sugar_content;
+                                            rtConfidence.textContent = (data.confidence * 100).toFixed(1);
+                                        }
+                                    } catch (err) {
+                                        console.error(err);
+                                    }
+                                }, 'image/jpeg');
+                            }
+
+                            // Start initialization
+                            init();
+                        </script>
+
+                    </body>
 
 </html>
