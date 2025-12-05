@@ -158,21 +158,6 @@
             text-align: center;
             z-index: 15;
             min-width: 220px;
-            opacity: 0;
-            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-            pointer-events: none;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        }
-
-        #realtime-result.visible {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0);
-        }
-
-        .label {
-            font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.7);
-            margin-bottom: 4px;
             text-transform: uppercase;
             letter-spacing: 0.1em;
         }
@@ -360,78 +345,35 @@
             ctxOverlay.clearRect(0, 0, overlay.width, overlay.height);
         }
 
-        async function detectLoop() {
-            if (!isPredicting) return;
 
-            // Ensure video dimensions are available
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                // 1. Detect Objects
-                const predictions = await detector.detect(video);
+        // Crop image
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
 
-                // 2. Find 'orange'
-                const orange = predictions.find(p => p.class === 'orange');
+        // Draw only the cropped area
+        ctx.drawImage(video, x, y, width, height, 0, 0, width, height);
 
-                ctxOverlay.clearRect(0, 0, overlay.width, overlay.height);
+        canvas.toBlob(async (blob) => {
+            const formData = new FormData();
+            formData.append('file', blob, 'mikan_crop.jpg');
 
-                if (orange) {
-                    // Draw Bounding Box
-                    const [x, y, width, height] = orange.bbox;
-                    ctxOverlay.strokeStyle = '#00FF00';
-                    ctxOverlay.lineWidth = 4;
-                    ctxOverlay.strokeRect(x, y, width, height);
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
 
-                    ctxOverlay.font = '18px Arial';
-                    ctxOverlay.fillStyle = '#00FF00';
-                    ctxOverlay.fillText(`Mikan (${Math.round(orange.score * 100)}%)`, x, y > 10 ? y - 5 : 10);
-
-                    // 3. Predict Sugar (Throttled)
-                    const now = Date.now();
-                    if (now - lastPredictionTime > PREDICTION_INTERVAL) {
-                        lastPredictionTime = now;
-                        await predictSugar(orange.bbox);
-                    }
-                } else {
-                    // Optional: Show "Looking for Mikan..."
+                if (!data.error) {
+                    rtSugar.textContent = data.sugar_content;
+                    rtConfidence.textContent = (data.confidence * 100).toFixed(1);
                 }
+            } catch (err) {
+                console.error(err);
             }
-
-            animationId = requestAnimationFrame(detectLoop);
-        }
-
-        async function predictSugar(bbox) {
-            const [x, y, width, height] = bbox;
-
-            // Add some padding to the crop if possible
-            const padding = 0; // 10% padding? maybe later
-
-            // Crop image
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-
-            // Draw only the cropped area
-            ctx.drawImage(video, x, y, width, height, 0, 0, width, height);
-
-            canvas.toBlob(async (blob) => {
-                const formData = new FormData();
-                formData.append('file', blob, 'mikan_crop.jpg');
-
-                try {
-                    const response = await fetch('/predict', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    const data = await response.json();
-
-                    if (!data.error) {
-                        rtSugar.textContent = data.sugar_content;
-                        rtConfidence.textContent = (data.confidence * 100).toFixed(1);
-                    }
-                } catch (err) {
-                    console.error(err);
+        }, 'image/jpeg');
                 }
-            }, 'image/jpeg');
-        }
 
         // Start initialization
         init();
